@@ -113,7 +113,7 @@ function startDrag(id, el, event) {
   const pixelsPerStep=id==='traction'
     ? Math.max(18,Math.min(24,el.getBoundingClientRect().height/4))
     : Math.max(10,el.getBoundingClientRect().height/range);
-  activeDrag={id,pointerId:event.pointerId,startY:event.clientY,start,commanded:start,lastTarget:start,pixelsPerStep};
+  activeDrag={id,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,start,commanded:start,lastTarget:start,pixelsPerStep,axis:null,sideReleaseEngaged:false};
   try{event.currentTarget.setPointerCapture?.(event.pointerId);}catch{ /* 部分 iOS WebKit 不开放指针捕获，窗口级监听仍可完成拖动。 */ }
 }
 function createFront() {
@@ -121,7 +121,7 @@ function createFront() {
   signalTarget=document.createElement('button');signalTarget.type='button';signalTarget.className='signal-trigger';signalTarget.setAttribute('aria-label','点击地面出站信号机进行确认');signalTarget.addEventListener('click',(event)=>{event.stopPropagation();openSignalInspection();});overlay.append(signalTarget);
   handSignalCard=document.createElement('section');handSignalCard.className='hand-signal-card';handSignalCard.setAttribute('aria-live','polite');handSignalCard.innerHTML='<b>确认发车手信号</b><video controls loop playsinline preload="metadata"><source src="./assets/video/AnimateDiff_00392-audio.mp4" type="video/mp4"></video><p>请观察发车手信号，确认显示正确后点击下方按钮。</p><button type="button" class="hand-signal-confirm">已确认发车手信号</button>';handSignalCard.querySelector('.hand-signal-confirm').addEventListener('click',()=>command('hand-signal-confirm'));overlay.append(handSignalCard);
   elements.auto=makeSprite('auto-brake','HXD1C_DZ.png',35,341,45,60,4,3,'自动制动阀（拖动）');
-  elements.independent=makeSprite('independent-brake','HXD1C_XZ.png',138,341,35,60,4,3,'单独制动阀（拖动）');
+  elements.independent=makeSprite('independent-brake','HXD1C_XZ.png',138,341,35,60,4,3,TRAINING_APP==='continuity'?'单独制动阀（上下拖动换位；向右滑动并保持为侧缓）':'单独制动阀（拖动）');
   elements.traction=makeSprite('traction','HXD1C_GL.png',464,345,46,81,2,8,'牵引/电制动手柄（拖动）');
   elements.direction=makeSprite('direction','HXD1C_HX.png',530,366,60,40,3,1,'方向手柄（点击切换）'); elements.direction.classList.add('direction'); elements.direction.addEventListener('click',()=>command('direction'));
   // 原 CVF 没有为中部板钮定义鼠标热区；不再用猜测坐标冒充真实按钮。
@@ -137,12 +137,6 @@ function createFront() {
   elements.hornButton=makePhysicalButton('horn-button','风笛（按住）',577,408,37,39,(el)=>{
     el.addEventListener('pointerdown',(event)=>{event.preventDefault();hornPointerId=event.pointerId;el.classList.add('pressed');command('horn-start');hornAudio.currentTime=0;hornAudio.play().catch(()=>{});try{el.setPointerCapture(event.pointerId);}catch{}});
   });
-  if(TRAINING_APP==='continuity'){
-    elements.sideRelease=makePhysicalButton('side-release-hold','按住侧缓单缓',174,321,48,27,(el)=>{
-      el.innerHTML='侧缓单缓<span>按住有效</span>';
-      el.addEventListener('pointerdown',(event)=>{event.preventDefault();event.stopPropagation();sideReleasePointerId=event.pointerId;el.classList.add('pressed');command('side-release-hold',true);try{el.setPointerCapture(event.pointerId);}catch{}});
-    });
-  }
   elements.autoPosition=makePositionBadge('auto','自阀',20,321,80);
   elements.independentPosition=makePositionBadge('independent','单阀',118,321,76);
   elements.tractionPosition=makePositionBadge('traction','牵引手柄',438,323,86);
@@ -180,8 +174,8 @@ function createFront() {
     ['auto',elements.auto,23,326,70,91,'拖动自动制动阀'],
     // 单阀与停放制动红、绿按钮距离很近。手机端把单阀触控区拆成
     // “左侧全高＋手柄下部”两个区域，明确让出停放制动按钮区域。
-    ['independent',elements.independent,122,326,35,91,'拖动单独制动阀'],
-    ['independent',elements.independent,157,380,31,37,'拖动单独制动阀'],
+    ['independent',elements.independent,122,326,35,91,TRAINING_APP==='continuity'?'上下拖动单阀；向右滑动并保持为侧缓':'拖动单独制动阀'],
+    ['independent',elements.independent,157,380,31,37,TRAINING_APP==='continuity'?'上下拖动单阀；向右滑动并保持为侧缓':'拖动单独制动阀'],
     ['traction',elements.traction,447,326,80,116,'拖动牵引和电制动手柄'],
   ];
   for(const [id,target,x,y,w,h,label] of touchControls){const zone=makeTouchTarget(id,x,y,w,h,label);zone.addEventListener('pointerdown',(event)=>startDrag(id,target,event));}
@@ -756,7 +750,37 @@ function syncSwitchPanel(state){
   if(!switchPanelRoot)return;
   for(const def of switchDefs){const button=switchPanelRoot.querySelector(`[data-switch-id="${def.id}"]`);if(!button)continue;const value=def.read(state);button.classList.remove('state-up','state-mid','state-down');let label='0';if(def.states){label=value==='white'?'白':value==='red'?'红':'0';button.classList.add(value==='white'?'state-up':value==='red'?'state-down':'state-mid');}else{const on=Boolean(value);label=on?def.on:def.off;button.classList.add(on?'state-up':'state-down');}button.querySelector('.switch-value').textContent=label;button.setAttribute('aria-pressed',String(Boolean(value&&value!=='0')));}
 }
-function bindDrag() { addEventListener('pointermove',(event)=>{ if(!activeDrag||(activeDrag.pointerId!==undefined&&event.pointerId!==activeDrag.pointerId))return; event.preventDefault(); const d=activeDrag; const delta=Math.round((d.startY-event.clientY)/d.pixelsPerStep); if(d.id==='traction'){const target=Math.max(-8,Math.min(7,d.start+delta));if(target===d.lastTarget)return;d.lastTarget=target;let current=d.commanded;while(current!==target){const next=current+(target>current?1:-1);if(command('traction',next)===false)break;current=next;}d.commanded=current;}else command(d.id==='auto'?'auto-brake':'independent-brake',Math.max(0,Math.min(5,d.start+delta))); },{passive:false}); addEventListener('pointerup',(event)=>{if(!activeDrag||activeDrag.pointerId===event.pointerId)activeDrag=null}); addEventListener('pointercancel',(event)=>{if(!activeDrag||activeDrag.pointerId===event.pointerId)activeDrag=null}); }
+function bindDrag() {
+  addEventListener('pointermove',(event)=>{
+    if(!activeDrag||(activeDrag.pointerId!==undefined&&event.pointerId!==activeDrag.pointerId))return;
+    event.preventDefault();
+    const d=activeDrag;
+    const deltaX=event.clientX-d.startX;
+    const deltaY=d.startY-event.clientY;
+    if(d.id==='independent'&&TRAINING_APP==='continuity'){
+      if(!d.axis&&Math.hypot(deltaX,deltaY)>=6)d.axis=Math.abs(deltaX)>Math.abs(deltaY)?'horizontal':'vertical';
+      if(d.axis==='horizontal'){
+        const threshold=Math.max(14,elements.independent?.getBoundingClientRect().width*.32||14);
+        if(!d.sideReleaseEngaged&&deltaX>=threshold){
+          d.sideReleaseEngaged=true;
+          sideReleasePointerId=d.pointerId;
+          elements.independent?.classList.add('side-release-active');
+          elements.independentPosition?.classList.add('side-release-active');
+          command('side-release-hold',true);
+        }
+        return;
+      }
+      if(!d.axis)return;
+    }
+    const delta=Math.round(deltaY/d.pixelsPerStep);
+    if(d.id==='traction'){
+      const target=Math.max(-8,Math.min(7,d.start+delta));if(target===d.lastTarget)return;d.lastTarget=target;let current=d.commanded;
+      while(current!==target){const next=current+(target>current?1:-1);if(command('traction',next)===false)break;current=next;}d.commanded=current;
+    }else command(d.id==='auto'?'auto-brake':'independent-brake',Math.max(0,Math.min(5,d.start+delta)));
+  },{passive:false});
+  const finish=(event)=>{if(!activeDrag||activeDrag.pointerId===event.pointerId){stopSideRelease(event);activeDrag=null;}};
+  addEventListener('pointerup',finish);addEventListener('pointercancel',finish);
+}
 function activeState(id,state) { return Boolean(state[id==='panto'?'panto':id==='main-breaker'?'mainBreaker':id==='control-power'?'powerOn':id==='parking'?'parkingBrake':id==='headlight'?'headlight':id==='compressor'?'compressor':id==='authority'?'authority':id==='horn'?'hornActive':id==='lkj'?'lkjAttempted':id==='reset'?'vigilanceAcknowledged':false]); }
 function syncSignalTarget(state){
   if(!signalTarget)return;
@@ -794,6 +818,7 @@ function render(state,message='') {
   syncCirIncomingIndicator(state);
   if(selectedView==='front') {
     frame(elements.auto,[0,1,2,9,10,11][state.autoBrake],4,3); frame(elements.independent,Math.min(11,state.independentBrake),4,3); frame(elements.traction,tractionFrame(state.traction),2,8); frame(elements.direction,state.direction==='R'?0:state.direction==='N'?1:2,3,1);
+    elements.independent.classList.toggle('side-release-active',Boolean(state.continuitySideReleaseActive));elements.independentPosition.classList.toggle('side-release-active',Boolean(state.continuitySideReleaseActive));
     for(const [id] of keys) elements[id]?.classList.toggle('on',activeState(id,state));
     // 严格按原 HXD1C.cvf 的 DIAL ScaleRange 映射；不能为了夸大变化
     // 临时缩小量程，否则同一压力会落在错误刻度。
@@ -802,7 +827,7 @@ function render(state,message='') {
     const scenario=getScenario(state.scenarioId);const activeLimit=state.trainingScope==='continuity'?ROUTE_TRAINING_PROFILE.firstBlockSpeedLimitKmh:state.lkjUnlockCorrect&&state.lkjUnlockLimit?state.lkjUnlockLimit:state.limitedStart?15:scenario.requiresLkjUnlock?20:80;
     elements.speedDigital.textContent=state.speed<10?state.speed.toFixed(1):Math.round(state.speed); elements.limitDigital.textContent=String(activeLimit); elements.clockDigital.textContent=new Date().toLocaleTimeString('zh-CN',{hour12:false});
     const autoNames=['运转位','初制动位','常用制动Ⅱ','常用制动Ⅲ','常用制动Ⅳ','紧急位'];const independentNames=['缓解位','制动Ⅰ','制动Ⅱ','制动Ⅲ','制动Ⅳ','全制动位'];
-    elements.autoPosition.querySelector('span').textContent=autoNames[state.autoBrake];elements.independentPosition.querySelector('span').textContent=independentNames[state.independentBrake];elements.directionPosition.querySelector('span').textContent=state.direction==='F'?'前进位':state.direction==='R'?'后退位':'中立位';elements.tractionPosition.querySelector('span').textContent=state.traction>0?`牵引 ${state.traction.toFixed(1)} 级`:state.traction<0?`电制动 ${Math.abs(state.traction).toFixed(1)} 级`:'零位';
+    elements.autoPosition.querySelector('span').textContent=autoNames[state.autoBrake];elements.independentPosition.querySelector('span').textContent=state.continuitySideReleaseActive?'右滑侧缓（保持）':independentNames[state.independentBrake];elements.directionPosition.querySelector('span').textContent=state.direction==='F'?'前进位':state.direction==='R'?'后退位':'中立位';elements.tractionPosition.querySelector('span').textContent=state.traction>0?`牵引 ${state.traction.toFixed(1)} 级`:state.traction<0?`电制动 ${Math.abs(state.traction).toFixed(1)} 级`:'零位';
     frame(elements.pantoDisplay,state.panto?1:0,1,2); frame(elements.signal,SIGNAL_ASPECTS[state.signalAspect].frame,4,2);
     const paperAvailable=deliveredCredentialAvailable(state);elements.credentialPaper.hidden=!paperAvailable;elements.credentialPaper.classList.toggle('available',paperAvailable);
   }
@@ -830,14 +855,14 @@ function renderSmoothStartPanel(state){
     setText('#metric-speed',`${state.speed.toFixed(1)} km/h`);
     setText('#metric-traction',state.traction>0?`${state.traction.toFixed(1)}级`:'零位');
     setText('#metric-start',`${Math.round(state.trainPipe)} kPa`);
-    setText('#metric-acceleration',state.continuitySideReleaseActive?'按住中':state.continuitySideReleaseCorrect?'已完成':'未按下');
+    setText('#metric-acceleration',state.continuitySideReleaseActive?'右滑保持中':state.continuitySideReleaseCorrect?'已完成':'未操作');
     setText('#metric-jerk',phase);
     setText('#metric-context-label','距2328信号机');
     setText('#metric-lkj',`${remaining} m`);
     const items=[
       ['尾压600 kPa',state.continuityTailPressureCorrect,state.continuityTailQueryAttempted?`${Math.round(state.tailPressureValue||0)} kPa`:'贯通试验前使用CIR查询'],
-      ['60 km/h初制动',state.continuityBrakeAppliedCorrectly,state.continuityBrakeAttempted?`施加时${Number(state.continuityBrakeSpeed||0).toFixed(1)} km/h`:state.continuitySpeedWindowMissed?'已超过62 km/h，操作仍可继续但本项扣分':state.continuitySpeedWindowEntered?'已进入58～62 km/h窗口，立即操作':'有效范围58～62 km/h；6.0级不是定速位'],
-      ['保持侧缓单缓',state.continuitySideReleaseCorrect,state.continuitySideReleaseActive?'正在按住':'与初制动同步按住'],
+      ['60 km/h初制动',state.continuityBrakeAppliedCorrectly,state.continuityBrakeAttempted?`施加时${Number(state.continuityBrakeSpeed||0).toFixed(1)} km/h`:state.continuitySpeedWindowMissed?'已超过62 km/h，操作仍可继续但本项扣分':state.continuitySpeedWindowEntered?'已进入58～62 km/h窗口，立即操作':'有效范围58～62 km/h；6.0级仿真上限64 km/h'],
+      ['右滑保持侧缓单缓',state.continuitySideReleaseCorrect,state.continuitySideReleaseActive?'单阀正在右滑保持':'自阀到初制动位后，按住单阀向右滑动并持续保持'],
       ['6.0退至5.0级',state.continuityTractionReducedCorrectly,state.continuitySpeedDeclining?'速度已下降，可退至5.0级':'等待排风和速度下降'],
       ['打开LKJ',state.continuityLkjObserved,state.continuityLkjOpenAttempted?'已打开，等待有效观察阶段':'速度下降阶段打开或保持显示'],
       ['缓解自阀',state.continuityAutoBrakeReleasedCorrectly,state.continuityReleaseAttempted?'已操作':'完成退级和LKJ观察后缓解'],
@@ -871,7 +896,7 @@ function renderSmoothStartPanel(state){
   const coach=$('#coach-progress');if(coach){coach.style.width=`${Math.round((state.wholeTrainStartFraction||0)*100)}%`;coach.parentElement?.classList.toggle('complete',Boolean(state.wholeTrainStarted));}
 }
 function stopHorn(event){if(hornPointerId===null)return;if(event?.pointerId!==undefined&&event.pointerId!==hornPointerId)return;hornPointerId=null;hornAudio.pause();hornAudio.currentTime=0;if(sim.state.hornActive)command('horn-stop');elements.hornButton?.classList.remove('pressed');}
-function stopSideRelease(event){if(sideReleasePointerId===null)return;if(event?.pointerId!==undefined&&event.pointerId!==sideReleasePointerId)return;sideReleasePointerId=null;elements.sideRelease?.classList.remove('pressed');command('side-release-hold',false);}
+function stopSideRelease(event){if(sideReleasePointerId===null)return;if(event?.pointerId!==undefined&&event.pointerId!==sideReleasePointerId)return;sideReleasePointerId=null;elements.independent?.classList.remove('side-release-active');elements.independentPosition?.classList.remove('side-release-active');command('side-release-hold',false);}
 function buildKeys(){if(!debugMode)return;document.body.classList.add('debug-mode');const root=$('#keys');keys.forEach(([id,name])=>{const b=document.createElement('button');b.dataset.id=id;b.textContent=name;b.addEventListener('click',()=>command(id));root.append(b);});}
 function setView(view){closeDevicePanels();selectedView=view;const rear=view==='rearLeft'||view==='rearRight';const cab=$('#cab');const stage=$('#stage');cab.src=`./assets/archive-cabview/${views[view]||views.front}`;cab.classList.toggle('side-view',view!=='front');cab.classList.toggle('rear-view',rear);stage.classList.toggle('rear-lookout-active',rear);routeScene.setView(view);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));if(view==='front')createFront();else{overlay.replaceChildren();if(rear){const status=document.createElement('section');status.className='rear-lookout-status';status.dataset.rearLookoutStatus='';status.innerHTML='<b>后部瞭望</b><span>车列移动确认 0/12辆 · 持续观察</span><small>纯三维视角：观察本务机车后方车列依次起动</small>';overlay.append(status);}}render(sim.state);}
 function setControlDrawer(targetId=null){

@@ -12,6 +12,7 @@ for (const resource of manifest.resources) {
 const interfaceSource = await readFile('scripts/archive-2d-cabview-real-route.js', 'utf8');
 const sceneSource = await readFile('scripts/mstsRouteScene.js', 'utf8');
 const styles = await readFile('styles/smooth-start.css', 'utf8');
+const continuityStyles = await readFile('styles/continuity-test.css', 'utf8');
 
 const nativeStates = [
   'main-blank.png',
@@ -45,9 +46,14 @@ assert.match(interfaceSource, /K2026次出站信号好了/);
 assert.match(interfaceSource, /K2026次3道发车/);
 assert.match(interfaceSource, /normal-signal-ready/);
 assert.match(interfaceSource, /normal-departure/);
+assert.match(interfaceSource, /deltaX>=threshold/);
+assert.match(interfaceSource, /command\('side-release-hold',true\)/);
+assert.doesNotMatch(interfaceSource, /makePhysicalButton\('side-release-hold'/);
 assert.match(styles, /\.stage\.rear-lookout-active \.cab-layer\{display:none\}/);
 assert.match(styles, /\.lkj-native-base/);
+assert.match(continuityStyles, /\.independent-brake\.side-release-active/);
 assert.match(sceneSource, /longitudinalSlack/);
+assert.match(sceneSource, /buildRailAlignedPath/);
 assert.match(sceneSource, /mesh\.frustumCulled = false/);
 assert.match(sceneSource, /lateralSway/);
 assert.match(sceneSource, /rearLeft: THREE\.MathUtils\.degToRad\(165\)/);

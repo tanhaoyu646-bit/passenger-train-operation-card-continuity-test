@@ -649,18 +649,29 @@ export class TrainSimulation {
       if (s.trainingScope !== 'continuity') return true;
       const pressed = Boolean(value);
       if (pressed) {
-        s.continuitySideReleaseAttempted = true;
         s.continuitySideReleaseActive = true;
-        s.continuitySideReleaseStartedAt = s.elapsed;
-        if (s.continuityBrakeAppliedAt != null
-          && Math.abs(s.elapsed - s.continuityBrakeAppliedAt) <= ROUTE_TRAINING_PROFILE.continuity.simultaneousWindowSeconds) {
-          s.continuitySideReleaseSynchronized = true;
+        const brakePrerequisiteMet = s.continuityBrakeAppliedCorrectly && s.autoBrake === 1;
+        if (brakePrerequisiteMet) {
+          s.continuitySideReleaseAttempted = true;
+          s.continuitySideReleaseStartedAt = s.elapsed;
+          if (s.continuityBrakeAppliedAt != null
+            && s.elapsed >= s.continuityBrakeAppliedAt
+            && s.elapsed - s.continuityBrakeAppliedAt <= ROUTE_TRAINING_PROFILE.continuity.simultaneousWindowSeconds) {
+            s.continuitySideReleaseSynchronized = true;
+          }
+          this.emit('单阀已向右侧滑并保持在侧缓位；松手后自动回到原位。');
+        } else {
+          s.continuitySideReleaseStartedAt = null;
+          this.deductContinuity('side-release-before-initial-brake', 3, '未先将自阀置于初制动位即操作侧缓单缓');
+          this.emit('侧缓动作已执行，但当前自阀不在初制动位，本次操作不计入评分；松手后请按顺序重做。');
         }
-        this.emit('侧缓单缓已按住；松开后单阀自动回位。');
       } else if (s.continuitySideReleaseActive) {
+        const eligibleHold = s.continuitySideReleaseStartedAt != null;
         s.continuitySideReleaseActive = false;
-        if (!s.continuitySpeedDeclining) this.deductContinuity('side-release-early', 3, '速度尚未开始下降即松开侧缓单缓');
-        else this.emit('侧缓单缓已松开，单阀自动回位。');
+        if (eligibleHold && !s.continuitySpeedDeclining) {
+          this.deductContinuity('side-release-early', 3, '速度尚未开始下降即松开侧缓单缓');
+        } else if (eligibleHold) this.emit('侧缓单缓已松开，单阀自动回位。');
+        else this.emit('单阀已松手回位；因前置初制动评分项未完成，本次侧缓操作不计分。');
       }
       return true;
     }
@@ -840,10 +851,8 @@ export class TrainSimulation {
         if (!s.continuityTailPressureCorrect) this.deductContinuity('brake-before-tail-query', 3, '未确认尾部风压600 kPa即开始贯通试验');
         if (!speedCorrect) this.deductContinuity('brake-speed-window', 3, `未在58～62 km/h范围内施加初制动（实际${s.speed.toFixed(1)} km/h）`);
         if (!s.continuityBrakeFromSix) this.deductContinuity('brake-not-from-six', 3, '初制动时牵引主手柄未处于6.0级及以上');
-        if (s.continuitySideReleaseActive
-          && Math.abs(s.elapsed - s.continuitySideReleaseStartedAt) <= ROUTE_TRAINING_PROFILE.continuity.simultaneousWindowSeconds) {
-          s.continuitySideReleaseSynchronized = true;
-        }
+        // 侧缓操作必须发生在自阀已经到达初制动位之后。提前按住再等待
+        // 自阀制动不能倒序取得该评分点。
       }
       if (previous > 0 && next === 0 && s.tailBaselinePressure != null) {
         s.autoBrakeReleaseAttempted = true;
@@ -995,8 +1004,18 @@ export class TrainSimulation {
     s.releasePropagation += ((brakesReleased ? 1 : 0) - s.releasePropagation) * Math.min(1, dt * (brakesReleased ? .34 : 1.2));
     s.actualTraction += ((s.traction > 0 ? s.traction : 0) - s.actualTraction) * Math.min(1, dt * .72);
     const tractionAllowed = this.tractionInterlockReasons(s.traction).length === 0;
+    const normalSpeedPowerFactor = Math.max(.34, 1 - s.speed / 125);
+    const notchSixSpeedFactor = s.trainingScope === 'continuity' && s.traction === 6
+      ? clamp(
+        (ROUTE_TRAINING_PROFILE.continuity.notchSixHardLimitKmh - s.speed)
+          / (ROUTE_TRAINING_PROFILE.continuity.notchSixHardLimitKmh - ROUTE_TRAINING_PROFILE.continuity.notchSixTaperStartKmh),
+        0,
+        1,
+      )
+      : 1;
     s.tractionForce = tractionAllowed && s.actualTraction > 0
-      ? Math.min(TRAIN_DYNAMICS.maxStartingTractiveEffortN, s.actualTraction * TRAIN_DYNAMICS.tractionForcePerNotchN) * Math.max(.34, 1 - s.speed / 125)
+      ? Math.min(TRAIN_DYNAMICS.maxStartingTractiveEffortN, s.actualTraction * TRAIN_DYNAMICS.tractionForcePerNotchN)
+        * normalSpeedPowerFactor * notchSixSpeedFactor
       : 0;
     if (s.tractionForce >= 10000) {
       s.tractionCurrentRising = true;
@@ -1044,7 +1063,10 @@ export class TrainSimulation {
       }
       if (holdingReleased && s.tractionPowerEstablished) s.hillHoldReleasedCorrectly = true;
     }
-    const activeLimit = s.lkjUnlockCorrect && s.lkjUnlockLimit > 0 ? s.lkjUnlockLimit : s.limitedStart ? 15 : 120;
+    const routeLimit = s.lkjUnlockCorrect && s.lkjUnlockLimit > 0 ? s.lkjUnlockLimit : s.limitedStart ? 15 : 120;
+    const activeLimit = s.trainingScope === 'continuity' && s.traction === 6
+      ? Math.min(routeLimit, ROUTE_TRAINING_PROFILE.continuity.notchSixHardLimitKmh)
+      : routeLimit;
     s.speed = clamp(s.speed + actual * dt * 3.6, 0, activeLimit); s.distance += s.speed / 3.6 * dt;
     if (s.trainingScope === 'continuity' && s.wholeTrainStarted && s.continuityTailPressureCorrect && !s.continuityBrakeAttempted) {
       const minimum = ROUTE_TRAINING_PROFILE.continuity.targetSpeedKmh - ROUTE_TRAINING_PROFILE.continuity.speedToleranceKmh;
@@ -1064,7 +1086,9 @@ export class TrainSimulation {
       if (s.continuityExhaustEstablished
         && s.speed <= (s.continuityBrakeStartSpeed || s.speed) - ROUTE_TRAINING_PROFILE.continuity.speedDropEvidenceKmh) {
         s.continuitySpeedDeclining = true;
-        if (s.continuitySideReleaseActive && s.continuitySideReleaseSynchronized) s.continuitySideReleaseCorrect = true;
+        if (s.continuityBrakeAppliedCorrectly && s.continuitySideReleaseActive && s.continuitySideReleaseSynchronized) {
+          s.continuitySideReleaseCorrect = true;
+        }
       }
     }
     const pullBuilding = tractionAllowed && s.actualTraction > .05 && s.releasePropagation > .35;

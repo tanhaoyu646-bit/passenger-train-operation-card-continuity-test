@@ -19,6 +19,11 @@ export const ROUTE_TRAINING_PROFILE = Object.freeze({
   continuity: Object.freeze({
     targetSpeedKmh: 60,
     speedToleranceKmh: 2,
+    // 本教学仿真把6.0级的持续运行速度约束在60～64 km/h区间：
+    // 60 km/h起逐步削减牵引，64 km/h为硬上限。这是项目教学标定，
+    // 不把真实机车牵引级位解释为速度定速器。
+    notchSixTaperStartKmh: 60,
+    notchSixHardLimitKmh: 64,
     tailPressureKpa: 600,
     simultaneousWindowSeconds: 2,
     speedDropEvidenceKmh: 0.5,

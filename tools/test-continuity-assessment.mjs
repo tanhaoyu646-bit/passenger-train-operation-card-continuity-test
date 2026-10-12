@@ -85,9 +85,9 @@ Object.assign(sim.state, {
 
 assert.equal(sim.command('tail-query', 571), true);
 assert.equal(sim.state.tailPressureValue, 600, '贯通试验前尾压应固定确认为600 kPa');
-assert.equal(sim.command('side-release-hold', true), true);
 assert.equal(sim.command('auto-brake', 1), true);
 assert.equal(sim.state.continuityBrakeAppliedCorrectly, true);
+assert.equal(sim.command('side-release-hold', true), true);
 tickFor(sim, 8);
 assert.equal(sim.state.continuitySpeedDeclining, true, '排风后必须形成可识别的速度下降');
 assert.equal(sim.state.continuitySideReleaseCorrect, true, '侧缓单缓应保持至速度下降');
@@ -103,6 +103,44 @@ assert.equal(sim.state.continuityTractionRestoredCorrectly, true);
 assert.equal(sim.state.completed, true);
 assert.equal(getProcedure(sim.state).length, 15);
 assert.equal(scoreRun(sim.state).score, 100, '规范完成平稳起车和贯通试验应得100分');
+
+const earlySideRelease = new TrainSimulation();
+Object.assign(earlySideRelease.state, {
+  trainingMode: 'assessment', trainingScope: 'continuity', scenarioSelected: true,
+  terrainMode: 'level', terrainSelected: true,
+});
+earlySideRelease.applySmoothStartPreset();
+Object.assign(earlySideRelease.state, {
+  parkingBrake: false, autoBrake: 0, independentBrake: 0, brakeCyl: 0,
+  trainPipe: 600, tailPipe: 600, releasePropagation: 1, wholeTrainStarted: true,
+  continuityTailPressureCorrect: true, speed: 60, traction: 6, actualTraction: 6,
+});
+assert.equal(earlySideRelease.command('side-release-hold', true), true);
+assert.equal(earlySideRelease.state.continuitySideReleaseAttempted, false, '自阀初制动前操作侧缓不得点亮评分项');
+assert.equal(earlySideRelease.command('auto-brake', 1), true);
+tickFor(earlySideRelease, 8);
+assert.equal(earlySideRelease.state.continuitySideReleaseSynchronized, false, '提前按住后等待自阀制动不得倒序取得同步证据');
+assert.equal(earlySideRelease.state.continuitySideReleaseCorrect, false, '倒序侧缓操作不得得分');
+assert.equal(scoreRun(earlySideRelease.state).itemScores[10].earned, 0, '倒序侧缓评分项必须为0分');
+assert(earlySideRelease.state.continuityDeductions.some((item) => item.key === 'side-release-before-initial-brake'));
+earlySideRelease.command('side-release-hold', false);
+
+const wrongBrakeThenSide = new TrainSimulation();
+Object.assign(wrongBrakeThenSide.state, {
+  trainingMode: 'assessment', trainingScope: 'continuity', scenarioSelected: true,
+  terrainMode: 'level', terrainSelected: true,
+});
+wrongBrakeThenSide.applySmoothStartPreset();
+Object.assign(wrongBrakeThenSide.state, {
+  parkingBrake: false, autoBrake: 0, independentBrake: 0, brakeCyl: 0,
+  trainPipe: 600, tailPipe: 600, releasePropagation: 1, wholeTrainStarted: true,
+  continuityTailPressureCorrect: true, speed: 52, traction: 6, actualTraction: 6,
+});
+wrongBrakeThenSide.command('auto-brake', 1);
+wrongBrakeThenSide.command('side-release-hold', true);
+assert.equal(wrongBrakeThenSide.state.continuityBrakeAppliedCorrectly, false);
+assert.equal(wrongBrakeThenSide.state.continuitySideReleaseAttempted, false, '前一评分项错误时侧缓不得进入可评分状态');
+assert.equal(scoreRun(wrongBrakeThenSide.state).itemScores[10].earned, 0);
 
 const speedCue = new TrainSimulation();
 Object.assign(speedCue.state, {
@@ -121,6 +159,9 @@ speedCue.state.speed = 62.2;
 speedCue.tick(.05);
 assert.equal(speedCue.state.continuitySpeedWindowMissed, true, '持续6.0级超过62 km/h应记录错过窗口');
 assert(speedCue.state.continuityDeductions.some((item) => item.key === 'missed-speed-window'));
+speedCue.state.speed = 63.9;
+tickFor(speedCue, 20);
+assert(speedCue.state.speed <= ROUTE_TRAINING_PROFILE.continuity.notchSixHardLimitKmh, '6.0级不得超过64 km/h教学上限');
 
 const wrong = new TrainSimulation();
 Object.assign(wrong.state, { trainingMode: 'assessment', trainingScope: 'continuity', terrainMode: 'level', terrainSelected: true });
@@ -130,4 +171,4 @@ assert.equal(wrong.command('auto-brake', 1), true, '考评模式错误操作不�
 assert.equal(wrong.state.continuityBrakeAttempted, true);
 assert(wrong.state.continuityDeductions.length > 0, '错误操作必须形成扣分记录');
 
-console.log('Continuity assessment valid: 20/80 scoring, 600 kPa query, 58–62 km/h initial brake, hold-to-release side control, 6→5 reduction, LKJ observation, release, and ≥6 restoration.');
+console.log('Continuity assessment valid: 20/80 scoring, 600 kPa query, 58–62 km/h initial brake, post-brake right-slide hold, 6.0-notch 64 km/h cap, 6→5 reduction, LKJ observation, release, and ≥6 restoration.');

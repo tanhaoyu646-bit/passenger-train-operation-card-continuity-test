@@ -1,5 +1,6 @@
 import * as THREE from '../lib/three/three.module.js';
 import { ROUTE_CONTEXT } from './smoothStartConfig.js';
+import { buildRailAlignedPath, cumulativePathDistances } from './railAlignedPath.js';
 
 // fetch() 的相对地址以页面而非当前模块为基准；GitHub Pages 位于仓库子目录，
 // 因此所有三维资源必须相对 import.meta.url 解析，不能使用普通 ../assets 字符串。
@@ -99,7 +100,7 @@ export class MstsRouteScene {
         sceneResponse.json(),
         pathResponse.json(),
       ]);
-      this.buildRoutePath(pathData);
+      this.buildRoutePath(pathData, sceneData);
       this.buildRoute(sceneData);
       this.buildPassengerConsist(12);
       if (ROUTE_RENDER_OPTIONS.proceduralTrack) this.buildSelectedRouteTrack(NEXT_STATION_DISTANCE + 350);
@@ -191,20 +192,13 @@ export class MstsRouteScene {
     });
   }
 
-  buildRoutePath(data) {
-    if (!Array.isArray(data.positions) || data.positions.length < 6 || data.positions.length % 3 !== 0) {
-      throw new Error('轨道中心线数据格式无效');
-    }
-    this.routePoints = [];
-    this.routeDistances = [0];
-    for (let index = 0; index < data.positions.length; index += 3) {
-      const point = new THREE.Vector3(data.positions[index], data.positions[index + 1], data.positions[index + 2]);
-      this.routePoints.push(point);
-      if (this.routePoints.length > 1) {
-        const previous = this.routePoints[this.routePoints.length - 2];
-        this.routeDistances.push(this.routeDistances[this.routeDistances.length - 1] + previous.distanceTo(point));
-      }
-    }
+  buildRoutePath(data, sceneData) {
+    // 原中心线只包含轨道构件连接点。直接线性插值会在曲线连接处走弦线，
+    // 驾驶视点离开站场后看起来会切出钢轨。使用相邻真实 TrackObj 的朝向
+    // 构造 Hermite 中心线，并以约5 m间距重采样，使位置和朝向连续贴合线路。
+    const alignedPoints = buildRailAlignedPath(data.positions, sceneData?.instances, { spacing: 5 });
+    this.routePoints = alignedPoints.map((point) => new THREE.Vector3(...point));
+    this.routeDistances = cumulativePathDistances(alignedPoints);
     this.pathLength = this.routeDistances[this.routeDistances.length - 1];
   }
 

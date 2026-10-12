@@ -116,7 +116,7 @@ export const CONTINUITY_PROCEDURE = [
   ['到出站信号机位置按压LKJ开车／7键', lkjStartReady, 2, s => s.lkjStartCorrect],
   ['贯通试验前查询并确认尾部风压600 kPa', s => s.continuityTailQueryAttempted, 10, s => s.continuityTailPressureCorrect],
   ['58～62 km/h时自阀移至初制动位', s => s.continuityBrakeAttempted, 15, s => s.continuityBrakeAppliedCorrectly],
-  ['初制动同时按住侧缓单缓至速度下降', s => s.continuitySideReleaseAttempted, 15, s => s.continuitySideReleaseCorrect],
+  ['自阀到初制动位后，单阀向右侧滑并保持至速度下降', s => s.continuitySideReleaseAttempted, 15, s => s.continuityBrakeAppliedCorrectly && s.continuitySideReleaseCorrect],
   ['速度下降后牵引主手柄由6.0级退至5.0级', s => s.continuityTractionReductionAttempted, 15, s => s.continuityTractionReducedCorrectly],
   ['速度下降阶段打开LKJ监控画面', s => s.continuityLkjOpenAttempted, 5, s => s.continuityLkjObserved],
   ['完成观察后缓解自阀', s => s.continuityReleaseAttempted, 10, s => s.continuityAutoBrakeReleasedCorrectly],

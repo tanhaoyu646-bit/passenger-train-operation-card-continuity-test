@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { buildRailAlignedPath, cumulativePathDistances } from '../scripts/railAlignedPath.js';
 
 const scene = JSON.parse(await readFile('assets/msts-neiyi-corridor/neiyi-neijiang-neijiangnan-scene.json', 'utf8'));
 const path = JSON.parse(await readFile('assets/msts-neiyi/neiyi-5635-trackdb-path.json', 'utf8'));
@@ -16,6 +17,15 @@ for (let index = 1; index < points.length; index += 1) {
 }
 
 assert.ok(cumulative.at(-1) > 10_000, 'route must extend beyond the complete first block');
+
+const alignedPoints = buildRailAlignedPath(path.positions, scene.instances, { spacing: 5 });
+const alignedDistances = cumulativePathDistances(alignedPoints);
+assert.ok(alignedPoints.length > points.length * 10, 'camera path must be densely sampled between track control points');
+assert.ok(alignedDistances.at(-1) > 10_000, 'rail-aligned camera path must cover the complete first block');
+assert.ok(
+  Math.abs(alignedDistances.at(-1) - cumulative.at(-1)) / cumulative.at(-1) < .01,
+  'rail-aligned smoothing must preserve operational distance within one percent',
+);
 
 function projectToPath([x, , z]) {
   let best = { lateral: Infinity, along: 0 };
@@ -49,4 +59,4 @@ assert.ok(
   `later first-block scenery is unexpectedly sparse (${laterFirstBlockAssets.length} nearby instances)`,
 );
 
-console.log(`Route extension tests passed (${Math.round(cumulative.at(-1))} m, ${laterFirstBlockAssets.length} later-block assets).`);
+console.log(`Route extension tests passed (${Math.round(alignedDistances.at(-1))} m rail-aligned path, ${laterFirstBlockAssets.length} later-block assets).`);
